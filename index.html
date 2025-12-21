@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Product Page</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #fff; }
+        .app { display: flex; height: 100vh; }
+        .viewer { flex: 1; position: relative; }
+        .info { width: 400px; padding: 3rem; background: rgba(20, 20, 20, 0.9); backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 1.5rem; }
+        .info h1 { font-size: 2rem; font-weight: 600; }
+        .description { color: #aaa; line-height: 1.6; }
+        .price { font-size: 2.5rem; font-weight: 700; color: #4a90e2; }
+        .btn { padding: 1rem 2rem; background: #4a90e2; border: none; border-radius: 8px; color: white; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.3s; }
+        .btn:hover { background: #357abd; }
+        .loading { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 1.5rem; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function Product3D() {
+            const mountRef = useRef();
+            
+            useEffect(() => {
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                
+                renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+                renderer.setClearColor(0x000000, 0);
+                mountRef.current.appendChild(renderer.domElement);
+                
+                const geometry = new THREE.BoxGeometry(2, 1.5, 0.5);
+                const material = new THREE.MeshStandardMaterial({ 
+                    color: 0x4a90e2, 
+                    metalness: 0.8, 
+                    roughness: 0.2 
+                });
+                const cube = new THREE.Mesh(geometry, material);
+                scene.add(cube);
+                
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+                scene.add(ambientLight);
+                
+                const spotLight = new THREE.SpotLight(0xffffff, 1);
+                spotLight.position.set(10, 10, 10);
+                scene.add(spotLight);
+                
+                camera.position.z = 5;
+                
+                function animate() {
+                    requestAnimationFrame(animate);
+                    cube.rotation.y += 0.01;
+                    renderer.render(scene, camera);
+                }
+                animate();
+                
+                const handleResize = () => {
+                    camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+                };
+                window.addEventListener('resize', handleResize);
+                
+                return () => {
+                    window.removeEventListener('resize', handleResize);
+                    mountRef.current?.removeChild(renderer.domElement);
+                };
+            }, []);
+            
+            return React.createElement('div', { ref: mountRef, style: { width: '100%', height: '100%' } });
+        }
+
+        function ProductViewer() {
+            return React.createElement('div', { className: 'viewer' }, 
+                React.createElement(Product3D)
+            );
+        }
+
+        function ProductInfo({ product }) {
+            return React.createElement('div', { className: 'info' },
+                React.createElement('h1', null, product.name),
+                React.createElement('p', { className: 'description' }, product.description),
+                React.createElement('div', { className: 'price' }, `$${product.price}`),
+                React.createElement('button', { className: 'btn' }, 'Add to Cart')
+            );
+        }
+
+        function App() {
+            const [product, setProduct] = useState(null);
+
+            useEffect(() => {
+                fetch('api/products.php?id=1')
+                    .then(res => res.json())
+                    .then(setProduct);
+            }, []);
+
+            if (!product) {
+                return React.createElement('div', { className: 'loading' }, 'Loading...');
+            }
+
+            return React.createElement('div', { className: 'app' },
+                React.createElement(ProductViewer),
+                React.createElement(ProductInfo, { product })
+            );
+        }
+
+        ReactDOM.render(React.createElement(App), document.getElementById('root'));
+    </script>
+</body>
+</html>
