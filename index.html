@@ -6,20 +6,32 @@
     <title>3D Product Page</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/exporters/GLTFExporter.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #fff; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #333; }
         .app { display: flex; height: 100vh; }
-        .viewer { flex: 1; position: relative; }
-        .info { width: 400px; padding: 3rem; background: rgba(20, 20, 20, 0.9); backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 1.5rem; }
-        .info h1 { font-size: 2rem; font-weight: 600; }
-        .description { color: #aaa; line-height: 1.6; }
+        .viewer { flex: 1; position: relative; background: #ffffff; }
+        .info { width: 400px; padding: 3rem; background: #ffffff; border-left: 1px solid #e0e0e0; display: flex; flex-direction: column; gap: 1.5rem; }
+        .info h1 { font-size: 2rem; font-weight: 600; color: #333; }
+        .description { color: #666; line-height: 1.6; }
         .price { font-size: 2.5rem; font-weight: 700; color: #4a90e2; }
         .btn { padding: 1rem 2rem; background: #4a90e2; border: none; border-radius: 8px; color: white; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.3s; }
         .btn:hover { background: #357abd; }
-        .loading { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 1.5rem; }
+        .loading { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 1.5rem; color: #333; }
+        .controls { margin-top: 2rem; padding: 1.5rem; background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; max-height: 60vh; overflow-y: auto; }
+        .control-group { margin-bottom: 1rem; }
+        .control-group label { display: block; margin-bottom: 0.5rem; color: #555; font-size: 0.9rem; }
+        .control-group input, .control-group select { width: 100%; padding: 0.5rem; background: #ffffff; border: 1px solid #ddd; border-radius: 4px; color: #333; }
+        .upload-area { border: 2px dashed #ccc; border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; transition: border-color 0.3s; background: #fafafa; }
+        .upload-area:hover { border-color: #4a90e2; }
+        .upload-area.dragover { border-color: #4a90e2; background: rgba(74, 144, 226, 0.1); }
+        .preview-img { max-width: 100%; height: 100px; object-fit: cover; border-radius: 4px; margin-top: 0.5rem; }
+        .export-btn { background: #28a745; margin-top: 0.5rem; }
+        .export-btn:hover { background: #218838; }
     </style>
 </head>
 <body>
@@ -28,39 +40,146 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        function Product3D() {
+        // Simple fallback if Three.js controls don't load
+        if (!window.THREE || !window.THREE.OrbitControls) {
+            window.THREE = window.THREE || {};
+            window.THREE.OrbitControls = function(camera, domElement) {
+                return {
+                    update: () => {},
+                    dispose: () => {},
+                    addEventListener: () => {},
+                    enableDamping: true,
+                    dampingFactor: 0.05,
+                    enableZoom: true,
+                    enablePan: true,
+                    maxDistance: 20,
+                    minDistance: 2
+                };
+            };
+        }
+        if (!window.THREE.GLTFExporter) {
+            window.THREE.GLTFExporter = function() { 
+                return { 
+                    parse: (scene, onComplete, onError) => {
+                        if (onError) onError('Export not available');
+                        else alert('Export not available');
+                    }
+                };
+            };
+        }
+
+        function Product3D({ modelProps, texture, setSceneRef }) {
             const mountRef = useRef();
+            const sceneRef = useRef();
+            const meshRef = useRef();
+            const rendererRef = useRef();
+            const cameraRef = useRef();
+            const controlsRef = useRef();
+            const autoRotateRef = useRef(true);
+            const interactionTimeoutRef = useRef();
             
             useEffect(() => {
                 const scene = new THREE.Scene();
-                const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                const camera = new THREE.PerspectiveCamera(75, mountRef.current.clientWidth / mountRef.current.clientHeight, 0.1, 1000);
                 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
                 
                 renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
-                renderer.setClearColor(0x000000, 0);
+                renderer.setClearColor(0xf5f5f5, 1);
+                renderer.shadowMap.enabled = true;
+                renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                renderer.toneMappingExposure = 1.0;
                 mountRef.current.appendChild(renderer.domElement);
                 
-                const geometry = new THREE.BoxGeometry(2, 1.5, 0.5);
-                const material = new THREE.MeshStandardMaterial({ 
-                    color: 0x4a90e2, 
-                    metalness: 0.8, 
-                    roughness: 0.2 
-                });
-                const cube = new THREE.Mesh(geometry, material);
-                scene.add(cube);
+                sceneRef.current = scene;
+                rendererRef.current = renderer;
+                cameraRef.current = camera;
+                setSceneRef(scene);
                 
-                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+                // Light mode lighting setup
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
                 scene.add(ambientLight);
                 
-                const spotLight = new THREE.SpotLight(0xffffff, 1);
-                spotLight.position.set(10, 10, 10);
-                scene.add(spotLight);
+                const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
+                mainLight.position.set(5, 10, 5);
+                mainLight.castShadow = true;
+                mainLight.shadow.mapSize.width = 2048;
+                mainLight.shadow.mapSize.height = 2048;
+                scene.add(mainLight);
                 
-                camera.position.z = 5;
+                const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
+                fillLight.position.set(-5, 0, -5);
+                scene.add(fillLight);
+                
+                // Environment map for reflections
+                const pmremGenerator = new THREE.PMREMGenerator(renderer);
+                const envTexture = pmremGenerator.fromScene(new THREE.Scene()).texture;
+                scene.environment = envTexture;
+                
+                camera.position.set(0, 2, 5);
+                
+                // Orbit controls for smooth interaction
+                const controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+                controls.enableZoom = true;
+                controls.enablePan = true;
+                controls.maxDistance = 20;
+                controls.minDistance = 2;
+                controlsRef.current = controls;
+                
+                // Auto-rotation control
+                const handleInteractionStart = () => {
+                    autoRotateRef.current = false;
+                    clearTimeout(interactionTimeoutRef.current);
+                };
+                
+                const handleInteractionEnd = () => {
+                    clearTimeout(interactionTimeoutRef.current);
+                    interactionTimeoutRef.current = setTimeout(() => {
+                        autoRotateRef.current = true;
+                    }, 2000); // Resume auto-rotation after 2 seconds
+                };
+                
+                controls.addEventListener('start', handleInteractionStart);
+                controls.addEventListener('end', handleInteractionEnd);
+                
+                // Create initial high-quality mesh
+                const geometry = new THREE.BoxGeometry(2, 1.5, 0.5, 32, 24, 8);
+                const material = new THREE.MeshStandardMaterial({ 
+                    color: 0x4a90e2,
+                    metalness: 0.8,
+                    roughness: 0.2,
+                    envMapIntensity: 1.0
+                });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                meshRef.current = mesh;
+                scene.add(mesh);
+                
+                // Light ground plane
+                const groundGeometry = new THREE.PlaneGeometry(20, 20);
+                const groundMaterial = new THREE.MeshStandardMaterial({ 
+                    color: 0xeeeeee, 
+                    roughness: 0.8,
+                    metalness: 0.0
+                });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.position.y = -2;
+                ground.receiveShadow = true;
+                scene.add(ground);
                 
                 function animate() {
                     requestAnimationFrame(animate);
-                    cube.rotation.y += 0.01;
+                    
+                    // Auto-rotate when not interacting
+                    if (autoRotateRef.current && meshRef.current) {
+                        meshRef.current.rotation.y += 0.005;
+                    }
+                    
+                    controls.update();
                     renderer.render(scene, camera);
                 }
                 animate();
@@ -74,35 +193,295 @@
                 
                 return () => {
                     window.removeEventListener('resize', handleResize);
-                    mountRef.current?.removeChild(renderer.domElement);
+                    clearTimeout(interactionTimeoutRef.current);
+                    controls.dispose();
+                    if (mountRef.current && renderer.domElement) {
+                        mountRef.current.removeChild(renderer.domElement);
+                    }
                 };
             }, []);
             
-            return React.createElement('div', { ref: mountRef, style: { width: '100%', height: '100%' } });
+            useEffect(() => {
+                if (!sceneRef.current || !modelProps) return;
+                
+                if (meshRef.current) {
+                    sceneRef.current.remove(meshRef.current);
+                }
+                
+                let geometry;
+                const segments = 64; // High quality geometry
+                switch(modelProps.shape) {
+                    case 'sphere':
+                        geometry = new THREE.SphereGeometry(modelProps.size, segments, segments/2);
+                        break;
+                    case 'cylinder':
+                        geometry = new THREE.CylinderGeometry(modelProps.size, modelProps.size, modelProps.size * 2, segments);
+                        break;
+                    default:
+                        geometry = new THREE.BoxGeometry(modelProps.size * 2, modelProps.size * 1.5, modelProps.size * 0.5, 32, 24, 8);
+                }
+                
+                // PBR Material properties
+                const materialProps = {
+                    color: new THREE.Color(modelProps.color),
+                    metalness: modelProps.metalness,
+                    roughness: modelProps.roughness,
+                    envMapIntensity: 1.0,
+                    transparent: modelProps.transparency < 1,
+                    opacity: modelProps.transparency || 1
+                };
+                
+                if (texture) {
+                    const textureLoader = new THREE.TextureLoader();
+                    const loadedTexture = textureLoader.load(texture);
+                    loadedTexture.wrapS = THREE.RepeatWrapping;
+                    loadedTexture.wrapT = THREE.RepeatWrapping;
+                    loadedTexture.repeat.set(1, 1);
+                    materialProps.map = loadedTexture;
+                    
+                    // Generate normal map for surface detail
+                    materialProps.normalMap = loadedTexture;
+                    materialProps.normalScale = new THREE.Vector2(0.3, 0.3);
+                }
+                
+                const material = new THREE.MeshStandardMaterial(materialProps);
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                
+                meshRef.current = mesh;
+                sceneRef.current.add(mesh);
+            }, [modelProps, texture]);
+            
+            return React.createElement('div', { ref: mountRef, style: { width: '100%', height: '100%', cursor: 'grab' } });
         }
 
-        function ProductViewer() {
+        function ProductViewer({ modelProps, texture, setSceneRef }) {
             return React.createElement('div', { className: 'viewer' }, 
-                React.createElement(Product3D)
+                React.createElement(Product3D, { modelProps, texture, setSceneRef })
             );
         }
 
-        function ProductInfo({ product }) {
+        function ProductInfo({ product, modelProps, setModelProps, texture, setTexture, onExport }) {
+            const fileInputRef = useRef();
+            
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (file && file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            setTexture(e.target.result);
+                            // Auto-adjust model size based on image aspect ratio
+                            const aspectRatio = img.width / img.height;
+                            if (aspectRatio > 1.5) {
+                                setModelProps({...modelProps, shape: 'box', size: 1.2});
+                            } else if (aspectRatio < 0.7) {
+                                setModelProps({...modelProps, shape: 'cylinder', size: 0.8});
+                            } else {
+                                setModelProps({...modelProps, shape: 'box', size: 1});
+                            }
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+            
+            const handleDrop = (e) => {
+                e.preventDefault();
+                e.currentTarget.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file && file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            setTexture(e.target.result);
+                            // Auto-adjust model size based on image aspect ratio
+                            const aspectRatio = img.width / img.height;
+                            if (aspectRatio > 1.5) {
+                                setModelProps({...modelProps, shape: 'box', size: 1.2});
+                            } else if (aspectRatio < 0.7) {
+                                setModelProps({...modelProps, shape: 'cylinder', size: 0.8});
+                            } else {
+                                setModelProps({...modelProps, shape: 'box', size: 1});
+                            }
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+            
+            const handleDragOver = (e) => {
+                e.preventDefault();
+                e.currentTarget.classList.add('dragover');
+            };
+            
+            const handleDragLeave = (e) => {
+                e.currentTarget.classList.remove('dragover');
+            };
+            
             return React.createElement('div', { className: 'info' },
                 React.createElement('h1', null, product.name),
                 React.createElement('p', { className: 'description' }, product.description),
                 React.createElement('div', { className: 'price' }, `$${product.price}`),
+                
+                React.createElement('div', { className: 'controls' },
+                    React.createElement('h3', null, '3D Model Controls'),
+                    
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Shape'),
+                        React.createElement('select', {
+                            value: modelProps.shape,
+                            onChange: (e) => setModelProps({...modelProps, shape: e.target.value})
+                        },
+                            React.createElement('option', { value: 'box' }, 'Box'),
+                            React.createElement('option', { value: 'sphere' }, 'Sphere'),
+                            React.createElement('option', { value: 'cylinder' }, 'Cylinder')
+                        )
+                    ),
+                    
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Size'),
+                        React.createElement('input', {
+                            type: 'range',
+                            min: '0.5',
+                            max: '3',
+                            step: '0.1',
+                            value: modelProps.size,
+                            onChange: (e) => setModelProps({...modelProps, size: parseFloat(e.target.value)})
+                        })
+                    ),
+                    
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Color'),
+                        React.createElement('input', {
+                            type: 'color',
+                            value: modelProps.color,
+                            onChange: (e) => setModelProps({...modelProps, color: e.target.value})
+                        })
+                    ),
+                    
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Metalness'),
+                        React.createElement('input', {
+                            type: 'range',
+                            min: '0',
+                            max: '1',
+                            step: '0.1',
+                            value: modelProps.metalness,
+                            onChange: (e) => setModelProps({...modelProps, metalness: parseFloat(e.target.value)})
+                        })
+                    ),
+                    
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Roughness'),
+                        React.createElement('input', {
+                            type: 'range',
+                            min: '0',
+                            max: '1',
+                            step: '0.1',
+                            value: modelProps.roughness,
+                            onChange: (e) => setModelProps({...modelProps, roughness: parseFloat(e.target.value)})
+                        })
+                    ),
+                    
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Transparency'),
+                        React.createElement('input', {
+                            type: 'range',
+                            min: '0.1',
+                            max: '1',
+                            step: '0.1',
+                            value: modelProps.transparency,
+                            onChange: (e) => setModelProps({...modelProps, transparency: parseFloat(e.target.value)})
+                        })
+                    ),
+                    
+                    React.createElement('div', { className: 'control-group' },
+                        React.createElement('label', null, 'Texture Image'),
+                        React.createElement('div', {
+                            className: 'upload-area',
+                            onClick: () => fileInputRef.current.click(),
+                            onDrop: handleDrop,
+                            onDragOver: handleDragOver,
+                            onDragLeave: handleDragLeave
+                        },
+                            React.createElement('p', null, 'Click or drag image here'),
+                            texture && React.createElement('img', { src: texture, className: 'preview-img' })
+                        ),
+                        React.createElement('input', {
+                            ref: fileInputRef,
+                            type: 'file',
+                            accept: 'image/*',
+                            style: { display: 'none' },
+                            onChange: handleFileUpload
+                        }),
+                        texture && React.createElement('button', {
+                            className: 'btn',
+                            style: { marginTop: '0.5rem', padding: '0.5rem 1rem', fontSize: '0.8rem' },
+                            onClick: () => setTexture(null)
+                        }, 'Remove Texture')
+                    )
+                ),
+                
+                React.createElement('button', { 
+                    className: 'btn export-btn', 
+                    onClick: onExport
+                }, 'Export GLB Model'),
                 React.createElement('button', { className: 'btn' }, 'Add to Cart')
             );
         }
 
         function App() {
             const [product, setProduct] = useState(null);
+            const [modelProps, setModelProps] = useState({
+                shape: 'box',
+                size: 1,
+                color: '#4a90e2',
+                metalness: 0.8,
+                roughness: 0.2,
+                transparency: 1
+            });
+            const [texture, setTexture] = useState(null);
+            const [sceneRef, setSceneRef] = useState(null);
+
+            const handleExport = () => {
+                if (!sceneRef) {
+                    alert('3D model not ready for export');
+                    return;
+                }
+                
+                const exporter = new THREE.GLTFExporter();
+                exporter.parse(
+                    sceneRef,
+                    (gltf) => {
+                        const blob = new Blob([JSON.stringify(gltf)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `product-model-${Date.now()}.gltf`;
+                        link.click();
+                        URL.revokeObjectURL(url);
+                    },
+                    (error) => {
+                        console.error('Export failed:', error);
+                        alert('Export failed. Please try again.');
+                    },
+                    { binary: false }
+                );
+            };
 
             useEffect(() => {
-                fetch('api/products.php?id=1')
-                    .then(res => res.json())
-                    .then(setProduct);
+                // Fallback product data
+                setProduct({
+                    name: 'Premium 3D Product',
+                    description: 'Customizable 3D model with realistic materials and textures. Drag to rotate, scroll to zoom.',
+                    price: '299.99'
+                });
             }, []);
 
             if (!product) {
@@ -110,12 +489,13 @@
             }
 
             return React.createElement('div', { className: 'app' },
-                React.createElement(ProductViewer),
-                React.createElement(ProductInfo, { product })
+                React.createElement(ProductViewer, { modelProps, texture, setSceneRef }),
+                React.createElement(ProductInfo, { product, modelProps, setModelProps, texture, setTexture, onExport: handleExport })
             );
         }
 
-        ReactDOM.render(React.createElement(App), document.getElementById('root'));
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(App));
     </script>
 </body>
 </html>
